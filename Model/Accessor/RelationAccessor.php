@@ -2,12 +2,12 @@
 
 namespace Oro\Bundle\EntityMergeBundle\Model\Accessor;
 
+use Doctrine\ORM\EntityManager;
+use Oro\Bundle\EntityMergeBundle\Metadata\FieldMetadata;
 use Symfony\Component\PropertyAccess\PropertyAccess;
 use Symfony\Component\PropertyAccess\PropertyAccessor;
 
-use Oro\Bundle\EntityMergeBundle\Metadata\FieldMetadata;
-
-class DefaultAccessor implements AccessorInterface
+class RelationAccessor implements AccessorInterface
 {
     /**
      * @var PropertyAccessor
@@ -15,11 +15,24 @@ class DefaultAccessor implements AccessorInterface
     protected $propertyAccessor;
 
     /**
+     * @var EntityManager
+     */
+    protected $entityManager;
+
+    /**
+     * @param EntityManager $entityManager
+     */
+    public function __construct(EntityManager $entityManager)
+    {
+        $this->entityManager = $entityManager;
+    }
+
+    /**
      * @return PropertyAccessor
      */
     public function getName()
     {
-        return 'default';
+        return 'relation';
     }
 
     /**
@@ -31,7 +44,8 @@ class DefaultAccessor implements AccessorInterface
      */
     public function supports($entity, FieldMetadata $metadata)
     {
-        return $metadata->getDoctrineMetadata()->isMappedBySourceEntity();
+        return !$metadata->getDoctrineMetadata()->isMappedBySourceEntity() ||
+        $metadata->getDoctrineMetadata()->isCollection();
     }
 
     /**
@@ -39,17 +53,13 @@ class DefaultAccessor implements AccessorInterface
      */
     public function getValue($entity, FieldMetadata $metadata)
     {
-        if ($metadata->has('getter')) {
-            $getter = $metadata->get('getter');
-            return $entity->$getter();
-        }
+        $fieldName = $metadata->getFieldName();
+        $className = $metadata->getDoctrineMetadata()->get('sourceEntity');
 
         return $this
-            ->getPropertyAccessor()
-            ->getValue(
-                $entity,
-                $this->getPropertyPath($metadata)
-            );
+            ->entityManager
+            ->getRepository($className)
+            ->findBy([$fieldName => $entity]);
     }
 
     /**
@@ -57,19 +67,24 @@ class DefaultAccessor implements AccessorInterface
      */
     public function setValue($entity, FieldMetadata $metadata, $value)
     {
-        if ($metadata->has('setter')) {
-            $setter = $metadata->get('setter');
-            $entity->$setter($value);
-            return;
-        }
+        foreach ($value as $relatedEntity) {
+            if ($metadata->has('setter')) {
+                $setter = $metadata->get('setter');
+                $relatedEntity->$setter($entity);
+                return;
+            }
 
-        $this
-            ->getPropertyAccessor()
-            ->setValue(
-                $entity,
-                $this->getPropertyPath($metadata),
-                $value
-            );
+            $this
+                ->getPropertyAccessor()
+                ->setValue(
+                    $relatedEntity,
+                    $this->getPropertyPath($metadata),
+                    $entity
+                );
+
+            $this->entityManager->persist($relatedEntity);
+            $this->entityManager->flush($relatedEntity);
+        }
     }
 
     /**
