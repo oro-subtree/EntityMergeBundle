@@ -1,4 +1,4 @@
-oro_entity_config:
+entity_config:
     # Scope of entity merge
     merge:
         # Attributes applicable on entity level
